@@ -1,0 +1,36 @@
+greenscape-backend/
+├── .env
+├── server.js
+├── package.json
+├── seed.js                     (Optional - to populate your DB)
+├── products.json               (Optional - dummy data file)
+│
+├── config/                     <-- NEW FOLDER
+│   └── db.js                   (Mongoose connection logic)
+│
+├── models/
+│   ├── User.js
+│   ├── Product.js
+│   └── Order.js
+│
+├── routes/
+│   ├── auth.js
+│   ├── products.js
+│   ├── orders.js
+│   └── admin.js                 <-- Admin CRUD routes
+│
+├── middleware/
+│   └── auth.js                   (JWT verification)
+│
+├── controllers/                  <-- NEW FOLDER (Optional but recommended)
+│   ├── adminController.js        (Separates logic from routes)
+│   └── productController.js      (Separates logic from routes)
+│
+└── utils/                         <-- NEW FOLDER
+    └── generateToken.js           (Helper for JWT creation)
+
+
+
+
+$2.10 --> 581.62Rs 
+ltc 0.0407215 --> 578.67 + 10.29 == 587rs
