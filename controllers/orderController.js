@@ -38,18 +38,41 @@ export const getAllOrders = async (req, res) => {
       .skip(skip)
       .limit(Number(limit));
 
-    const analytics = {
-      totalOrders,
-      totalRevenue: await Order.aggregate([
-        { $match: filter },
-        { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-      ]).then(result => result[0]?.total || 0),
-      pendingOrders: await Order.countDocuments({ orderStatus: 'pending' }),
-      processingOrders: await Order.countDocuments({ orderStatus: 'processing' }),
-      shippedOrders: await Order.countDocuments({ orderStatus: 'shipped' }),
-      deliveredOrders: await Order.countDocuments({ orderStatus: 'delivered' }),
-      cancelledOrders: await Order.countDocuments({ orderStatus: 'cancelled' }),
-    };
+    // const analytics = {
+    //   totalOrders,
+    //   totalRevenue: await Order.aggregate([
+    //     { $match: filter },
+    //     { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    //   ]).then(result => result[0]?.total || 0),
+    //   pendingOrders: await Order.countDocuments({ orderStatus: 'pending' }),
+    //   processingOrders: await Order.countDocuments({ orderStatus: 'processing' }),
+    //   shippedOrders: await Order.countDocuments({ orderStatus: 'shipped' }),
+    //   deliveredOrders: await Order.countDocuments({ orderStatus: 'delivered' }),
+    //   cancelledOrders: await Order.countDocuments({ orderStatus: 'cancelled' }),
+    // };
+
+    // new version 24/09/2026
+
+    const [totalRevenueRes, pending, processing, shipped, delivered, cancelled] =
+  await Promise.all([
+    Order.aggregate([{ $match: filter }, { $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
+    Order.countDocuments({ orderStatus: 'pending' }),
+    Order.countDocuments({ orderStatus: 'processing' }),
+    Order.countDocuments({ orderStatus: 'shipped' }),
+    Order.countDocuments({ orderStatus: 'delivered' }),
+    Order.countDocuments({ orderStatus: 'cancelled' }),
+  ]);
+
+const analytics = {
+  totalOrders,
+  totalRevenue: totalRevenueRes[0]?.total || 0,
+  pendingOrders: pending,
+  processingOrders: processing,
+  shippedOrders: shipped,
+  deliveredOrders: delivered,
+  cancelledOrders: cancelled,
+};
+
 
     res.json({
       orders,
@@ -88,59 +111,123 @@ export const getSingleOrder = async (req, res) => {
   }
 };
 
+// export const updateOrderStatus = async (req, res) => {
+//   try {
+//     const { status, note } = req.body;
+    
+//     if (!status) {
+//       return res.status(400).json({ error: 'Status is required' });
+//     }
+    
+//     const order = await Order.findById(req.params.id)
+//       .populate('user', 'firstName lastName email phone');
+    
+//     if (!order) {
+//       return res.status(404).json({ error: 'Order not found' });
+//     }
+    
+//     // Update order status
+//     order.orderStatus = status;
+    
+//     order.statusHistory.push({
+//       status: status,
+//       changedAt: new Date(),
+//       note: note || `Status changed to ${status}`
+//     });
+    
+//     // Set special dates
+//     if (status === 'delivered') {
+//       order.deliveredAt = new Date();
+//     }
+    
+//     if (status === 'cancelled') {
+//       order.cancelledAt = new Date();
+//     }
+    
+//     await order.save();
+    
+//     // ✅ SEND EMAIL TO CUSTOMER
+//     if (order.user?.email) {
+//       const template = getOrderStatusEmailTemplate(order, status);
+      
+//       await sendEmail(
+//         order.user.email,
+//         template.subject,
+//         template.html
+//       );
+      
+//       console.log(`📧 Email sent to ${order.user.email} for order ${order.orderNumber}`);
+//     }
+    
+//     res.json({
+//       success: true,
+//       message: `Order status updated to ${status}`,
+//       emailSent: true,
+//       order
+//     });
+//   } catch (err) {
+//     console.error('Error updating order status:', err);
+//     res.status(400).json({ error: err.message });
+//   }
+// };
+
+
+// new version 24/09/2026
 export const updateOrderStatus = async (req, res) => {
   try {
     const { status, note } = req.body;
-    
+
     if (!status) {
       return res.status(400).json({ error: 'Status is required' });
     }
-    
+
     const order = await Order.findById(req.params.id)
       .populate('user', 'firstName lastName email phone');
-    
+
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
-    
+
     // Update order status
     order.orderStatus = status;
-    
+
     order.statusHistory.push({
       status: status,
       changedAt: new Date(),
-      note: note || `Status changed to ${status}`
+      note: note || `Status changed to ${status}`,
     });
-    
-    // Set special dates
+
     if (status === 'delivered') {
       order.deliveredAt = new Date();
     }
-    
+
     if (status === 'cancelled') {
       order.cancelledAt = new Date();
     }
-    
+
     await order.save();
-    
-    // ✅ SEND EMAIL TO CUSTOMER
+
+    // ✅ Fire-and-forget the email — response returns immediately
     if (order.user?.email) {
       const template = getOrderStatusEmailTemplate(order, status);
-      
-      await sendEmail(
-        order.user.email,
-        template.subject,
-        template.html
+
+      waitUntil(
+        sendEmail(order.user.email, template.subject, template.html)
+          .then((r) =>
+            console.log(
+              `📧 ${order.orderNumber}:`,
+              r.success ? 'sent' : `failed: ${r.error}`
+            )
+          )
+          .catch((e) => console.error('📧 send failed:', e.message))
       );
-      
-      console.log(`📧 Email sent to ${order.user.email} for order ${order.orderNumber}`);
     }
-    
+
     res.json({
       success: true,
       message: `Order status updated to ${status}`,
-      emailSent: true,
-      order
+      emailQueued: !!order.user?.email,
+      order,
     });
   } catch (err) {
     console.error('Error updating order status:', err);
@@ -263,3 +350,7 @@ export const addAdminNote = async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 };
+
+
+
+

@@ -1,26 +1,26 @@
 
-// new version
-// server.js - FIXED VERSION
+// server.js - VERCEL PRODUCTION VERSION
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
-import dns from "dns";
+import helmet from 'helmet';
+import dns from 'dns';
 
-// ✅ LOAD ENV FIRST (BEFORE any imports that use env)
+dotenv.config({ path: '.env.local' });
+
+// ✅ Fallback to .env if .env.local is missing (useful for CI/prod)
 dotenv.config();
 
-// ✅ NOW import services that use env variables
 import { testEmailConnection } from './utils/emailService.js';
-
 import adminRoutes from './routes/admin.route.js';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import categoryRoutes from './routes/category.route.js';
 import bannerRoutes from './routes/banner.route.js';
 import adminCustomerRoutes from './routes/Customer.route.js';
-import blogRoutes from "./routes/blogRoutes.js";
+import blogRoutes from './routes/blogRoutes.js';
 import collectionRoutes from './routes/collection.route.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import discountRoutes from './routes/discount.route.js';
@@ -28,190 +28,157 @@ import adminChatRoutes from './routes/adminChat.route.js';
 import adminActionsRoutes from './routes/adminActions.route.js';
 import adminReviewRoutes from './routes/adminReview.route.js';
 
-
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
+// Only set DNS in local/dev — Vercel manages DNS
+if (process.env.NODE_ENV !== 'production') {
+  dns.setServers(['1.1.1.1', '8.8.8.8']);
+}
 
 const app = express();
+app.set('trust proxy', 1);
 
-// ===== ✅ FIXED CORS CONFIGURATION =====
-const corsOptions = {
-  origin: ['http://localhost:3000',
-           'http://localhost:3001',
-           'https://your-frontend-name.vercel.app',
-          ],
+// ===== ✅ SECURITY HEADERS =====
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
+// ===== ✅ CORS (env-driven) =====
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  process.env.FRONTEND_URL,          // e.g. https://admin-greenscape.vercel.app
+  process.env.FRONTEND_URL_ALT,      // optional second domain
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // allow server-to-server / curl
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    console.warn('🚫 CORS blocked:', origin);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With'],
-};
-
-app.use(cors(corsOptions));
+}));
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
-// ✅ Debug middleware - log all requests
-app.use((req, res, next) => {
-  console.log(`📡 ${req.method} ${req.url}`);
-  next();
+// ===== ✅ Request log (prod-safe) =====
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`📡 ${req.method} ${req.url}`);
+    next();
+  });
+}
+
+// ===== ✅ MONGOOSE — cached connection for serverless =====
+let isConnected = false;
+
+async function connectDB() {
+  if (isConnected) return;
+  if (!process.env.MONGO_URI) throw new Error('MONGO_URI missing');
+  await mongoose.connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+    maxPoolSize: 10,
+  });
+  isConnected = true;
+  console.log('✅ MongoDB Connected');
+}
+
+// Connect eagerly (best-effort) — errors caught by requests later
+connectDB().catch(err => console.error('❌ MongoDB initial connect failed:', err.message));
+
+// Ensure DB is connected before handling any route
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('❌ DB connect error:', err.message);
+    res.status(500).json({ success: false, error: 'Database unavailable' });
+  }
 });
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected'))
-  .catch(err => console.log('❌ MongoDB Error:', err));
-
 // ==========================================
-// ✅ ROUTES - ALL MOUNTED HERE
+// ✅ ROUTES
 // ==========================================
 app.use('/api/admin', adminRoutes);
-app.use("/api/admin/chat", adminChatRoutes);
-app.use("/api/admin/actions", adminActionsRoutes);
+app.use('/api/admin/chat', adminChatRoutes);
+app.use('/api/admin/actions', adminActionsRoutes);
 app.use('/api/admin/reviews', adminReviewRoutes);
 app.use('/api/admin', bannerRoutes);
 app.use('/api/admin/blog', blogRoutes);
 app.use('/api/admin', categoryRoutes);
 app.use('/api/admin', collectionRoutes);
 app.use('/api/admin', adminCustomerRoutes);
-app.use('/api/admin', discountRoutes); 
+app.use('/api/admin', discountRoutes);
 app.use('/api/admin', orderRoutes);
 app.use('/api/admin', productRoutes);
 app.use('/api/admin', paymentRoutes);
 
-// ✅ Test email connection AFTER env is loaded
-testEmailConnection().then(result => {
-  if (result.success) {
-    console.log('✅ Email service ready');
-  } else {
-    console.log('⚠️ Email service not ready:', result.error);
-  }
-});
-
-// ✅ 404 handler
-app.use((req, res, next) => {
-  console.log('❌ 404 - Route not found:', req.method, req.url);
-  res.status(404).json({
-    success: false,
-    error: `Route ${req.method} ${req.url} not found`
+// ===== ✅ Health check (for Vercel / uptime monitors) =====
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    env: process.env.NODE_ENV,
+    time: new Date().toISOString(),
   });
 });
 
-// ✅ Error handler
+// ===== ✅ Email test (SECURED — requires secret header) =====
+app.get('/api/test-email', async (req, res) => {
+  if (req.headers['x-test-secret'] !== process.env.TEST_SECRET) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  try {
+    const { sendEmail, testEmailConnection } = await import('./utils/emailService.js');
+    const connectionTest = await testEmailConnection();
+    if (!connectionTest.success) {
+      return res.json({ success: false, error: connectionTest.error });
+    }
+    const result = await sendEmail(
+      process.env.TEST_EMAIL_TO || 'you@example.com',
+      '✅ GreenScape Test Email',
+      `<h1>Email test OK</h1><p>${new Date().toISOString()}</p>`
+    );
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('❌ Test email error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ===== ✅ 404 handler =====
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Route ${req.method} ${req.url} not found`,
+  });
+});
+
+// ===== ✅ Error handler (no stack traces in prod) =====
 app.use((err, req, res, next) => {
   console.error('💥 Error:', err.message);
   res.status(err.status || 500).json({
     success: false,
-    error: err.message || 'Internal Server Error'
+    error: process.env.NODE_ENV === 'production'
+      ? 'Internal Server Error'
+      : err.message,
   });
 });
 
-// ==========================================
-// ✅ TEST EMAIL ENDPOINT
-// ==========================================
-app.get('/api/test-email', async (req, res) => {
-  try {
-    const { sendEmail, testEmailConnection } = await import('./utils/emailService.js');
-    
-    // Test connection first
-    const connectionTest = await testEmailConnection();
-    
-    if (!connectionTest.success) {
-      return res.json({
-        success: false,
-        error: connectionTest.error,
-        message: 'Email connection failed'
-      });
-    }
-    
-    // Send test email
-    const result = await sendEmail(
-      'sheikhrizwanghulamnabi555@gmail.com',
-      '✅ GreenScape Test Email',
-      `
-        <h1 style="color: #2B7A4B;">Email Test Successful!</h1>
-        <p>Your GreenScape email service is working properly.</p>
-        <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-        <p><strong>Configuration:</strong></p>
-        <ul>
-          <li>EMAIL_USER: ${process.env.EMAIL_USER}</li>
-          <li>EMAIL_APP_PASSWORD: ${process.env.EMAIL_APP_PASSWORD ? '✅ Set' : '❌ Missing'}</li>
-        </ul>
-      `
-    );
-    
-    res.json({
-      success: true,
-      result,
-      message: 'Test email sent successfully'
+// ===== ✅ ONLY listen in local dev =====
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5001;
+  app.listen(PORT, () => {
+    console.log(`🚀 Admin Backend running on http://localhost:${PORT}`);
+    testEmailConnection().then(r => {
+      console.log(r.success ? '✅ Email ready' : `⚠️ Email not ready: ${r.error}`);
     });
-  } catch (error) {
-    console.error('❌ Test email error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+  });
+}
 
-// ==========================================
-// ✅ START SERVER
-// ==========================================
-const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
-  console.log(`🚀 Admin Backend running on http://localhost:${PORT}`);
-  console.log('✅ Blog routes mounted at /api/admin/blog');
-  console.log('✅ Discount routes mounted at /api/admin/discounts');
-
-  // ==========================================
-  // ✅ DEBUG: List all blog routes
-  // ==========================================
-  console.log('\n📋 Blog routes:');
-  if (blogRoutes && blogRoutes.stack) {
-    blogRoutes.stack.forEach((route) => {
-      if (route.route) {
-        const methods = Object.keys(route.route.methods);
-        methods.forEach(method => {
-          console.log(`  ${method.toUpperCase()} /api/admin/blog${route.route.path}`);
-        });
-      }
-    });
-  } else {
-    console.log('  ❌ No blog routes loaded');
-  }
-
-  // ==========================================
-  // ✅ DEBUG: List all discount routes
-  // ==========================================
-  console.log('\n📋 Discount routes:');
-  if (discountRoutes && discountRoutes.stack) {
-    discountRoutes.stack.forEach((route) => {
-      if (route.route) {
-        const methods = Object.keys(route.route.methods);
-        methods.forEach(method => {
-          console.log(`  ${method.toUpperCase()} /api/admin${route.route.path}`);
-        });
-      }
-    });
-  } else {
-    console.log('  ❌ No discount routes loaded');
-  }
-
-  // ==========================================
-  // ✅ DEBUG: List all collection routes
-  // ==========================================
-  console.log('\n📋 Collection routes:');
-  if (collectionRoutes && collectionRoutes.stack) {
-    collectionRoutes.stack.forEach((route) => {
-      if (route.route) {
-        const methods = Object.keys(route.route.methods);
-        methods.forEach(method => {
-          console.log(`  ${method.toUpperCase()} /api/admin${route.route.path}`);
-        });
-      }
-    });
-  } else {
-    console.log('  ❌ No collection routes loaded');
-  }
-
-  console.log('\n✅ All routes registered successfully');
-});
+// ✅ Export for Vercel serverless
+export default app;

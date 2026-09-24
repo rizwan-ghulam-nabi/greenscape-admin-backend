@@ -4,7 +4,9 @@ import ChatMessage from '../models/ChatMessage.js';
 const N8N_CHAT_WEBHOOK =
   process.env.N8N_CHAT_WEBHOOK || 'http://localhost:5678/webhook/admin-chat';
 
-const AI_TIMEOUT_MS = 30000;
+  // const AI_TIMEOUT_MS = 30000;
+const AI_TIMEOUT_MS = 8000;
+
 
 // ==========================================
 // ✅ SEND MESSAGE → forwards to n8n

@@ -1,5 +1,3 @@
-
-
 // backend/routes/category.route.js
 import express from 'express';
 import auth from '../middleware/adminAuth.js';

@@ -49,7 +49,8 @@ export const dispatchAdminAction = async (req, res) => {
 
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
+      // const timeout = setTimeout(() => controller.abort(), 15000);
+      const timeout = setTimeout(() => controller.abort(), 8000);
 
       const n8nRes = await fetch(N8N_ADMIN_WEBHOOK, {
         method: 'POST',
