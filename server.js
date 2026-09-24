@@ -117,13 +117,24 @@ app.use('/api/admin', orderRoutes);
 app.use('/api/admin', productRoutes);
 app.use('/api/admin', paymentRoutes);
 
-// ===== ✅ Health check (for Vercel / uptime monitors) =====
+// health test
 app.get('/health', (req, res) => {
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  const uri = process.env.MONGO_URI || '';
+  
+  // Mask password for safety
+  const maskedUri = uri.replace(/(mongodb\+srv:\/\/[^:]+:)([^@]+)(@.*)/, '$1***$3');
+  
   res.json({
     ok: true,
-    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    db: states[mongoose.connection.readyState] || 'unknown',
     env: process.env.NODE_ENV,
     time: new Date().toISOString(),
+    // Debug info (safe — password hidden)
+    mongoUriPresent: !!uri,
+    mongoUriLength: uri.length,
+    mongoUriMasked: maskedUri || '(EMPTY)',
+    mongoError: global.__lastMongoError || null,
   });
 });
 
