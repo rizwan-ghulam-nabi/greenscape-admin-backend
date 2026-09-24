@@ -1,19 +1,27 @@
-
-// server.js - VERCEL PRODUCTION VERSION
+// server.js — VERCEL PRODUCTION VERSION
 import express from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import dns from 'dns';
 
+// ✅ Load env FIRST
 dotenv.config({ path: '.env.local' });
+dotenv.config(); // fallback
 
-// ✅ Fallback to .env if .env.local is missing (useful for CI/prod)
-dotenv.config();
+// ✅ Local dev DNS (Vercel manages its own)
+if (process.env.NODE_ENV !== 'production') {
+  dns.setServers(['1.1.1.1', '8.8.8.8']);
+}
 
+// ✅ Mongo (single source of truth)
+import connectDB, { getMongoStatus } from './config/db.js';
+
+// ✅ Services
 import { testEmailConnection } from './utils/emailService.js';
+
+// ✅ Routes
 import adminRoutes from './routes/admin.route.js';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
@@ -28,11 +36,6 @@ import adminChatRoutes from './routes/adminChat.route.js';
 import adminActionsRoutes from './routes/adminActions.route.js';
 import adminReviewRoutes from './routes/adminReview.route.js';
 
-// Only set DNS in local/dev — Vercel manages DNS
-if (process.env.NODE_ENV !== 'production') {
-  dns.setServers(['1.1.1.1', '8.8.8.8']);
-}
-
 const app = express();
 app.set('trust proxy', 1);
 
@@ -43,27 +46,29 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
-  process.env.FRONTEND_URL,          // e.g. https://admin-greenscape.vercel.app
-  process.env.FRONTEND_URL_ALT,      // optional second domain
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL_ALT,
 ].filter(Boolean);
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // allow server-to-server / curl
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    console.warn('🚫 CORS blocked:', origin);
-    return cb(new Error(`CORS blocked: ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With'],
-}));
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // server-to-server / curl
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      console.warn('🚫 CORS blocked:', origin);
+      return cb(new Error(`CORS blocked: ${origin}`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'x-setup-secret', 'x-test-secret'],
+  })
+);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
-// ===== ✅ Request log (prod-safe) =====
+// ===== ✅ Request log (dev only) =====
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
     console.log(`📡 ${req.method} ${req.url}`);
@@ -71,33 +76,58 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// ===== ✅ MONGOOSE — cached connection for serverless =====
-let isConnected = false;
+// ===== ✅ MongoDB — eager connect + per-request guard =====
+connectDB().catch(() => {
+  // Error stored in global.__lastMongoError — visible via /health
+});
 
-async function connectDB() {
-  if (isConnected) return;
-  if (!process.env.MONGO_URI) throw new Error('MONGO_URI missing');
-  await mongoose.connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 10000,
-    socketTimeoutMS: 45000,
-    maxPoolSize: 10,
-  });
-  isConnected = true;
-  console.log('✅ MongoDB Connected');
-}
-
-// Connect eagerly (best-effort) — errors caught by requests later
-connectDB().catch(err => console.error('❌ MongoDB initial connect failed:', err.message));
-
-// Ensure DB is connected before handling any route
 app.use(async (req, res, next) => {
+  // Skip health + CORS preflight
+  if (req.method === 'OPTIONS') return next();
+  if (req.path === '/health' || req.path === '/api/test-email') return next();
+
+  if (getMongoStatus().readyState === 1) return next();
+
   try {
     await connectDB();
     next();
   } catch (err) {
-    console.error('❌ DB connect error:', err.message);
-    res.status(500).json({ success: false, error: 'Database unavailable' });
+    return res.status(503).json({
+      success: false,
+      error: 'Database unavailable',
+      details: global.__lastMongoError || err.message,
+    });
   }
+});
+
+// ==========================================
+// ✅ HEALTH CHECK
+// ==========================================
+app.get('/health', async (req, res) => {
+  const uri = process.env.MONGO_URI || '';
+  const maskedUri = uri.replace(/(mongodb\+srv:\/\/[^:]+:)([^@]+)(@.*)/, '$1***$3');
+
+  // Force a connect attempt if not connected — captures the real error
+  if (getMongoStatus().readyState !== 1) {
+    try {
+      await connectDB();
+    } catch {
+      // stored in global.__lastMongoError
+    }
+  }
+
+  const { state, error } = getMongoStatus();
+
+  res.json({
+    ok: true,
+    db: state,
+    env: process.env.NODE_ENV,
+    time: new Date().toISOString(),
+    mongoUriPresent: !!uri,
+    mongoUriLength: uri.length,
+    mongoUriMasked: maskedUri || '(EMPTY)',
+    mongoError: error,
+  });
 });
 
 // ==========================================
@@ -117,28 +147,9 @@ app.use('/api/admin', orderRoutes);
 app.use('/api/admin', productRoutes);
 app.use('/api/admin', paymentRoutes);
 
-// health test
-app.get('/health', (req, res) => {
-  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
-  const uri = process.env.MONGO_URI || '';
-  
-  // Mask password for safety
-  const maskedUri = uri.replace(/(mongodb\+srv:\/\/[^:]+:)([^@]+)(@.*)/, '$1***$3');
-  
-  res.json({
-    ok: true,
-    db: states[mongoose.connection.readyState] || 'unknown',
-    env: process.env.NODE_ENV,
-    time: new Date().toISOString(),
-    // Debug info (safe — password hidden)
-    mongoUriPresent: !!uri,
-    mongoUriLength: uri.length,
-    mongoUriMasked: maskedUri || '(EMPTY)',
-    mongoError: global.__lastMongoError || null,
-  });
-});
-
-// ===== ✅ Email test (SECURED — requires secret header) =====
+// ==========================================
+// ✅ SECURED TEST EMAIL
+// ==========================================
 app.get('/api/test-email', async (req, res) => {
   if (req.headers['x-test-secret'] !== process.env.TEST_SECRET) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -161,7 +172,9 @@ app.get('/api/test-email', async (req, res) => {
   }
 });
 
-// ===== ✅ 404 handler =====
+// ==========================================
+// ✅ 404 HANDLER
+// ==========================================
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -169,23 +182,28 @@ app.use((req, res) => {
   });
 });
 
-// ===== ✅ Error handler (no stack traces in prod) =====
+// ==========================================
+// ✅ GLOBAL ERROR HANDLER
+// ==========================================
 app.use((err, req, res, next) => {
   console.error('💥 Error:', err.message);
   res.status(err.status || 500).json({
     success: false,
-    error: process.env.NODE_ENV === 'production'
-      ? 'Internal Server Error'
-      : err.message,
+    error:
+      process.env.NODE_ENV === 'production'
+        ? 'Internal Server Error'
+        : err.message,
   });
 });
 
-// ===== ✅ ONLY listen in local dev =====
+// ==========================================
+// ✅ LOCAL DEV ONLY — listen + test email
+// ==========================================
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5001;
   app.listen(PORT, () => {
     console.log(`🚀 Admin Backend running on http://localhost:${PORT}`);
-    testEmailConnection().then(r => {
+    testEmailConnection().then((r) => {
       console.log(r.success ? '✅ Email ready' : `⚠️ Email not ready: ${r.error}`);
     });
   });
