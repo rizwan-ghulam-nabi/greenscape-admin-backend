@@ -35,7 +35,10 @@ const app = express();
 
 // ===== ✅ FIXED CORS CONFIGURATION =====
 const corsOptions = {
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: ['http://localhost:3000',
+           'http://localhost:3001',
+           'https://your-frontend-name.vercel.app',
+          ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With'],
