@@ -1,6 +1,6 @@
 // backend/routes/admin.route.js - PRODUCTION VERSION (Vercel-ready)
 import express from 'express';
-import Admin from '../models/Admin.js';
+import Admin from '../models/admin.js';
 import User from '../models/User.js';
 import Order from '../models/Order.js';
 import Product from '../models/Product.js';
