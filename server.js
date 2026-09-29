@@ -271,12 +271,24 @@ app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
 // 🔧 CORS — make it loud if FRONTEND_URL is missing
+// const allowedOrigins = [
+//   'http://localhost:3000',
+//   'http://localhost:3001',
+//   process.env.FRONTEND_URL,
+//   process.env.FRONTEND_URL_ALT,
+// ].filter(Boolean);
+
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
+  'https://greenscape-admin-frontend.vercel.app',         // ← hardcoded
+  'https://greenscape-admin-frontend.vercel.app/',        // ← with slash (safety)
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL_ALT,
 ].filter(Boolean);
+
+// 🔍 Debug log so we can see what's allowed on each cold start
+console.log('🔓 CORS allowed origins:', allowedOrigins);
 
 if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
   console.error('❌ FRONTEND_URL is not set — CORS will block your admin panel!');
@@ -294,6 +306,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'x-setup-secret', 'x-test-secret'],
 }));
+
+
+
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
