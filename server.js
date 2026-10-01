@@ -1,3 +1,4 @@
+console.error('BOOT_MARKER_2026 ' + new Date().toISOString());
 // // server.js — VERCEL PRODUCTION VERSION
 // import express from 'express';
 // import cors from 'cors';
