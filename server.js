@@ -38,13 +38,7 @@ app.set('trust proxy', 1);
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// 🔧 CORS — make it loud if FRONTEND_URL is missing
-// const allowedOrigins = [
-//   'http://localhost:3000',
-//   'http://localhost:3001',
-//   process.env.FRONTEND_URL,
-//   process.env.FRONTEND_URL_ALT,
-// ].filter(Boolean);
+
 
 const allowedOrigins = [
   'http://localhost:3000',
