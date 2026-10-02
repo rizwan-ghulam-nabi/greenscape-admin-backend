@@ -205,7 +205,7 @@ import Admin from '../models/Admin.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { sendEmail } from '../utils/emailService.js';  // ⚠️ Adjust path if different
+import { sendEmail } from '../utils/emailService.js';
 
 // ==========================================
 // ADMIN LOGIN
@@ -256,10 +256,9 @@ export const adminLogin = async (req, res) => {
         email: admin.email,
         isAdmin: admin.isAdmin,
         role: admin.role,
-        lastLogin: admin.lastLogin
-      }
+        lastLogin: admin.lastLogin,
+      },
     });
-
   } catch (err) {
     console.error('Admin login error:', err);
     res.status(500).json({ error: err.message });
@@ -284,7 +283,7 @@ export const adminLogout = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Admin logged out successfully'
+      message: 'Admin logged out successfully',
     });
   } catch (err) {
     console.error('Admin logout error:', err);
@@ -306,8 +305,8 @@ export const getCurrentAdmin = async (req, res) => {
         email: req.admin.email,
         role: req.admin.role,
         permissions: req.admin.permissions,
-        lastLogin: req.admin.lastLogin
-      }
+        lastLogin: req.admin.lastLogin,
+      },
     });
   } catch (err) {
     console.error('Error fetching admin:', err);
@@ -316,7 +315,7 @@ export const getCurrentAdmin = async (req, res) => {
 };
 
 // ==========================================
-// FORGOT PASSWORD — Send reset email
+// FORGOT PASSWORD — Send reset email (with DEBUG)
 // ==========================================
 export const forgotPassword = async (req, res) => {
   try {
@@ -333,6 +332,7 @@ export const forgotPassword = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: 'If an account exists with that email, a reset link has been sent.',
+        debug: { reason: 'no admin found with that email' },
       });
     }
 
@@ -380,20 +380,34 @@ export const forgotPassword = async (req, res) => {
       </div>
     `;
 
+    // ===== DEBUG BLOCK (temporary) =====
+    let emailResult;
     try {
-      await sendEmail(
+      console.log('📧 [forgotPassword] Attempting email to:', admin.email);
+      console.log('📧 [forgotPassword] RESEND_API_KEY present?', !!process.env.RESEND_API_KEY);
+      console.log(
+        '📧 [forgotPassword] Key prefix:',
+        (process.env.RESEND_API_KEY || '').slice(0, 8)
+      );
+
+      emailResult = await sendEmail(
         admin.email,
         '🌿 Reset Your GreenScape Admin Password',
         emailHtml
       );
+
+      console.log('📧 [forgotPassword] sendEmail returned:', JSON.stringify(emailResult));
     } catch (emailErr) {
       console.error('❌ Email send failed:', emailErr);
-      // Don't expose failure to client
+      console.error('❌ Error message:', emailErr.message);
+      console.error('❌ Error stack:', emailErr.stack);
+      emailResult = { success: false, error: emailErr.message };
     }
 
     res.status(200).json({
       success: true,
       message: 'If an account exists with that email, a reset link has been sent.',
+      debug: emailResult, // ⚠️ REMOVE after debugging
     });
   } catch (err) {
     console.error('❌ Forgot password error:', err);
