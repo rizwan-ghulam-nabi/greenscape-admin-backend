@@ -394,22 +394,15 @@ const BannerSchema = new mongoose.Schema(
     button: {
       text: { type: String, default: 'Shop Now', trim: true },
 
-      position: {
-        type: String,
-        enum: [
-          'Bottom Left',
-          'Bottom Center',
-          'Bottom Right',
-          'Center',
-          'Center Left',
-          'Center Right',
-          'Top Left',
-          'Top Right',
-        ],
-        default: 'Center',
-      },
+      // ✅ Drag position (% of banner)
+      x: { type: Number, default: 50, min: 0, max: 100 },
+      y: { type: Number, default: 50, min: 0, max: 100 },
 
-      // ✅ Size now supports "Custom"
+      // ✅ Pixel size — used when size === 'Custom'
+      width:  { type: Number, default: 160, min: 20, max: 1200 },
+      height: { type: Number, default: 48,  min: 16, max: 400  },
+
+      // ✅ Size preset (Custom allowed)
       size: {
         type: String,
         enum: ['Small', 'Medium', 'Large', 'Custom'],
@@ -427,33 +420,15 @@ const BannerSchema = new mongoose.Schema(
         },
       },
 
-      // ✅ Only used when size === 'Custom'
-      // Values are in px; null means "use default for the size"
-      customSize: {
-        paddingX: {
-          type: Number,
-          default: null,
-          min: 0,
-          max: 200,
-        },
-        paddingY: {
-          type: Number,
-          default: null,
-          min: 0,
-          max: 200,
-        },
-        fontSize: {
-          type: Number,
-          default: null,
-          min: 8,
-          max: 72,
-        },
-        minWidth: {
-          type: Number,
-          default: null,
-          min: 0,
-          max: 2000,
-        },
+      // Legacy — kept for backward compatibility
+      position: {
+        type: String,
+        enum: [
+          'Bottom Left', 'Bottom Center', 'Bottom Right',
+          'Center', 'Center Left', 'Center Right',
+          'Top Left', 'Top Right',
+        ],
+        default: 'Center',
       },
 
       style: {
@@ -488,6 +463,34 @@ const BannerSchema = new mongoose.Schema(
     },
 
     // ==========================================
+    // ✅ BADGE (your UI sends this)
+    // ==========================================
+    badge: {
+      enabled: { type: Boolean, default: false },
+      text:    { type: String, default: '50% OFF', trim: true },
+      x:       { type: Number, default: 82, min: 0, max: 100 },
+      y:       { type: Number, default: 22, min: 0, max: 100 },
+      bgColor: {
+        type: String,
+        default: '#dc2626',
+        match: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i,
+      },
+      textColor: {
+        type: String,
+        default: '#FFFFFF',
+        match: /^#([0-9a-f]{3}|[0-9a-f]{6})$/i,
+      },
+      shape: {
+        type: String,
+        enum: ['pill', 'rounded', 'square'],
+        default: 'pill',
+      },
+      fontSize: { type: Number, default: 14, min: 8, max: 72 },
+      paddingX: { type: Number, default: 14, min: 0, max: 100 },
+      paddingY: { type: Number, default: 6,  min: 0, max: 100 },
+    },
+
+    // ==========================================
     // OVERLAY
     // ==========================================
     overlayType: {
@@ -506,23 +509,23 @@ const BannerSchema = new mongoose.Schema(
     // DISPLAY SETTINGS
     // ==========================================
     showOnDesktop: { type: Boolean, default: true },
-    showOnTablet: { type: Boolean, default: true },
-    showOnMobile: { type: Boolean, default: true },
+    showOnTablet:  { type: Boolean, default: true },
+    showOnMobile:  { type: Boolean, default: true },
 
     startDate: { type: Date, default: null },
-    endDate: { type: Date, default: null },
+    endDate:   { type: Date, default: null },
 
     showOnPages: {
-      home: { type: Boolean, default: true },
-      shop: { type: Boolean, default: false },
+      home:     { type: Boolean, default: true },
+      shop:     { type: Boolean, default: false },
       category: { type: Boolean, default: false },
-      product: { type: Boolean, default: false },
+      product:  { type: Boolean, default: false },
     },
 
     // ==========================================
     // ANIMATION & LAYOUT
     // ==========================================
-    marginTop: { type: Number, default: 0 },
+    marginTop:    { type: Number, default: 0 },
     marginBottom: { type: Number, default: 0 },
     animation: {
       type: String,
@@ -535,16 +538,16 @@ const BannerSchema = new mongoose.Schema(
 );
 
 // ==========================================
-// ✅ INDEXES
+// INDEXES
 // ==========================================
 BannerSchema.index({ isActive: 1, order: 1 });
 BannerSchema.index({ 'showOnPages.home': 1, isActive: 1, order: 1 });
 
 // ==========================================
-// ✅ VALIDATION HOOK
+// VALIDATION HOOK
+// (⚠️ NO customSize check — that was the bug)
 // ==========================================
 BannerSchema.pre('validate', function () {
-  // Link type validation
   if (this.linkType === 'Category' && !this.categoryId) {
     throw new Error('categoryId is required when linkType is "Category"');
   }
@@ -555,56 +558,36 @@ BannerSchema.pre('validate', function () {
     throw new Error('customUrl is required when linkType is "Custom URL"');
   }
 
-  // Date range
   if (this.startDate && this.endDate && this.endDate <= this.startDate) {
     throw new Error('endDate must be after startDate');
-  }
-
-  // ✅ If size is Custom, make sure at least one custom value is provided
-  if (this.button?.size === 'Custom') {
-    const cs = this.button.customSize || {};
-    const hasAny =
-      cs.paddingX != null ||
-      cs.paddingY != null ||
-      cs.fontSize != null ||
-      cs.minWidth != null;
-    if (!hasAny) {
-      throw new Error(
-        'button.customSize must include at least one value (paddingX, paddingY, fontSize, or minWidth) when size is "Custom"'
-      );
-    }
   }
 });
 
 // ==========================================
-// ✅ VIRTUALS
+// VIRTUALS
 // ==========================================
 BannerSchema.virtual('hasButton').get(function () {
   return !!(this.button?.text && this.button.text.trim());
 });
 
-// ✅ Resolve final button dimensions based on size + customSize
 BannerSchema.virtual('button.resolvedSize').get(function () {
   const size = this.button?.size || 'Medium';
-  const preset = {
-    Small:  { paddingX: 12, paddingY: 6,  fontSize: 13, minWidth: 90  },
-    Medium: { paddingX: 20, paddingY: 10, fontSize: 15, minWidth: 120 },
-    Large:  { paddingX: 28, paddingY: 14, fontSize: 17, minWidth: 160 },
-  };
 
   if (size === 'Custom') {
-    const base = preset.Medium;
-    const cs = this.button.customSize || {};
     return {
-      paddingX: cs.paddingX ?? base.paddingX,
-      paddingY: cs.paddingY ?? base.paddingY,
-      fontSize: cs.fontSize ?? base.fontSize,
-      minWidth: cs.minWidth ?? base.minWidth,
+      width:    this.button.width  ?? 160,
+      height:   this.button.height ?? 48,
       isCustom: true,
     };
   }
 
-  return { ...preset[size], isCustom: false };
+  const preset = {
+    Small:  { width: 120, height: 40 },
+    Medium: { width: 160, height: 48 },
+    Large:  { width: 200, height: 56 },
+  };
+
+  return { ...(preset[size] || preset.Medium), isCustom: false };
 });
 
 BannerSchema.set('toJSON', { virtuals: true });
