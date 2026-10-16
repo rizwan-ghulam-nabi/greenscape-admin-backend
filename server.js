@@ -31,7 +31,7 @@ import discountRoutes from './routes/discount.route.js';
 import adminChatRoutes from './routes/adminChat.route.js';
 import adminActionsRoutes from './routes/adminActions.route.js';
 import adminReviewRoutes from './routes/adminReview.route.js';
-
+import careerRoutes from './routes/careers.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -130,7 +130,7 @@ app.use('/api/admin', discountRoutes);
 app.use('/api/admin', orderRoutes);
 app.use('/api/admin', productRoutes);
 app.use('/api/admin', paymentRoutes);
-
+app.use('/api/careers', careerRoutes);
 // 🔧 REMOVED /api/test-email — it's an attack surface. If you keep it, fix the secret check.
 
 app.use((req, res) => {
